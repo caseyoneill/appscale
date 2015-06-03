@@ -27,7 +27,9 @@ public final class BlobUploadSessionStorage
 
     public BlobUploadSessionStorage()
     {
+        //logger.finer("Starting DatastoreService.");
         this.datastoreService = DatastoreServiceFactory.getDatastoreService();
+        //logger.finer("DatastoreService is available.");
     }
 
     public String createSession( BlobUploadSession session )
