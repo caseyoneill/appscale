@@ -59,11 +59,16 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
 
     public void init( LocalServiceContext context, Map<String, String> properties )
     {
+	try
+	{
         /*
          * AppScale - replaced body of init method
+*	logger.fine("Initializing blobstore upload service...");
+*	logger.fine("UploadSessionStorage initialized");
+*	logger.fine("DatastoreService initialized");
+*	logger.fine("BlobStorageFactory set");
          */
-        logger.fine("Initializing blobstore service");
-        this.uploadSessionStorage = new BlobUploadSessionStorage();
+	this.uploadSessionStorage = new BlobUploadSessionStorage();
         datastoreService = DatastoreServiceFactory.getDatastoreService();
         if (datastoreService == null)
         {
@@ -71,6 +76,11 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
         }
         BlobStorageFactory.setDatastoreBlobStorage();
         this.blobStorage = BlobStorageFactory.getBlobStorage();
+        //logger.info("BlobStore init complete!");
+	} catch (Exception e)
+	{
+	    logger.log(Level.SEVERE, "LocalBlobStoreService died on logger.fine", e);
+	}
     }
 
     public void start()
@@ -142,24 +152,33 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
         logger.finer("fetchData called");
         if (request.getStartIndex() < 0L)
         {
+            logger.severe("Data out of range called with request [" + request + "]");
             throw new ApiProxy.ApplicationException(BlobstoreServicePb.BlobstoreServiceError.ErrorCode.DATA_INDEX_OUT_OF_RANGE.getValue(), "Start index must be >= 0.");
         }
 
         if (request.getEndIndex() < request.getStartIndex())
         {
+            logger.severe("Data out of range called with request [" + request + "]");
             throw new ApiProxy.ApplicationException(BlobstoreServicePb.BlobstoreServiceError.ErrorCode.DATA_INDEX_OUT_OF_RANGE.getValue(), "End index must be >= startIndex.");
         }
 
         long fetchSize = request.getEndIndex() - request.getStartIndex() + 1L;
         if (fetchSize > MAX_BLOB_FETCH_SIZE)
         {
+            logger.severe("Blob fetch too large called with request [" + request + "]");
             throw new ApiProxy.ApplicationException(BlobstoreServicePb.BlobstoreServiceError.ErrorCode.BLOB_FETCH_SIZE_TOO_LARGE.getValue(), "Blob fetch size too large.");
         }
 
         BlobstoreServicePb.FetchDataResponse response = new BlobstoreServicePb.FetchDataResponse();
         BlobKey blobKey = new BlobKey(request.getBlobKey());
         BlobInfo blobInfo = new BlobInfoFactory().loadBlobInfo(blobKey);
-        if (blobInfo == null) throw new ApiProxy.ApplicationException(BlobstoreServicePb.BlobstoreServiceError.ErrorCode.BLOB_NOT_FOUND.getValue(), "Blob not found.");
+        logger.finer("Retrieved BlobInfo");
+		
+        if (blobInfo == null) {
+            logger.severe("Blob not found with request [" + request + "]");
+            throw new ApiProxy.ApplicationException(BlobstoreServicePb.BlobstoreServiceError.ErrorCode.BLOB_NOT_FOUND.getValue(), "Blob not found.");
+        }
+		
         long endIndex;
         if (request.getEndIndex() > blobInfo.getSize() - 1L)
             endIndex = blobInfo.getSize() - 1L;
@@ -169,6 +188,7 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
         }
         if (request.getStartIndex() > endIndex)
         {
+			logger.warning("Blob request startIndex is larger than endIndex with request [" + request + "]");
             response.setData("");
         }
         else
@@ -182,25 +202,31 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
 
             String block_key = blobKey.getKeyString() + "__" + block_count;
             Key key = KeyFactory.createKey("__BlobChunk__", block_key);
-            if (this.blockKeyCache != key.toString())
+            if ((this.blockKeyCache != null && !(this.blockKeyCache.equals(key.toString()))) || this.blockCache == null)
             {
+                logger.finer("Skipped cache, looking up blob block key : " + key.toString());
                 Entity entity;
                 try
                 {
                     entity = datastoreService.get(key);
                     this.blockCache = (Blob)entity.getProperty("block");
                     this.blockKeyCache = key.toString();
-
+                    logger.finer("Retrieved entity from datastore with key: " + key.toString() + ". Storing in cache.");
                 }
                 catch (EntityNotFoundException e)
                 {
-                    e.printStackTrace();
+                    logger.severe("Entity not found with key: " + key.toString());
                 }
-            }
-            byte[] bytes = blockCache.getBytes();
+            } else
+			{
+				logger.finer("Blob block is in cache for key : " + key.toString());
+			}
+			
+            byte[] bytes = this.blockCache.getBytes();
             // # Matching boundaries, start and end are within one fetch
             if (block_count_end == block_count)
             {
+				logger.finer("Getting blob in single fetch");
                 // Is there enough data to satisfy fetch_size bytes?
 
                 if ((bytes.length - block_modulo) >= fetchSize)
@@ -217,6 +243,9 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
                     return response;
                 }
             }
+			
+			
+			logger.finer("Getting blob in multiple parts");
             byte[] data = Arrays.copyOfRange(bytes, (int)block_modulo, bytes.length);
             int data_size = data.length;
 
@@ -232,7 +261,7 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
             }
             catch (EntityNotFoundException e)
             {
-                e.printStackTrace();
+                logger.severe("Entity not found with key: " + key.toString());
             }
             byte[] newData = new byte[(int)(fetchSize)];
             System.arraycopy(data, 0, newData, 0, data_size);
@@ -250,3 +279,4 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
         return response;
     }
 }
+
