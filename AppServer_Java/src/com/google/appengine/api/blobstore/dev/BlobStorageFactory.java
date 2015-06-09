@@ -22,11 +22,17 @@ public class BlobStorageFactory
     public static BlobStorage getBlobStorage()
     {
 	//logger.fine("Retrieving BlobStorage..");
-        if (blobStorage == null)
+		if (blobStorage == null)
         {
-            logger.severe("BlobStorage is null.");
-            throw new IllegalStateException("Must call one of set*BlobStorage() first.");
-        }
+			//default to datastore backed blobstorage
+			setDatastoreBlobStorage();
+
+        	if (blobStorage == null)
+        	{
+            	logger.severe("BlobStorage is null.");
+            	throw new IllegalStateException("Must call one of set*BlobStorage() first.");
+        	}
+		}
 	//logger.fine("BlobStorage retrieved.");
         return blobStorage;
     }
