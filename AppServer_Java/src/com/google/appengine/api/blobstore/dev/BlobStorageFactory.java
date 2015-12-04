@@ -3,9 +3,6 @@ package com.google.appengine.api.blobstore.dev;
 
 import java.io.File;
 
-import com.google.appengine.api.blobstore.dev.BlobInfoStorage;
-import com.google.appengine.api.blobstore.dev.BlobStorage;
-
 public class BlobStorageFactory
 {
     private static final BlobInfoStorage blobInfoStorage = new BlobInfoStorage();
@@ -18,10 +15,16 @@ public class BlobStorageFactory
 
     public static BlobStorage getBlobStorage()
     {
-        if (blobStorage == null)
+		if (blobStorage == null)
         {
-            throw new IllegalStateException("Must call one of set*BlobStorage() first.");
-        }
+			//default to datastore backed blobstorage
+			setDatastoreBlobStorage();
+
+        	if (blobStorage == null)
+        	{
+            	throw new IllegalStateException("Must call one of set*BlobStorage() first.");
+        	}
+		}
         return blobStorage;
     }
 
