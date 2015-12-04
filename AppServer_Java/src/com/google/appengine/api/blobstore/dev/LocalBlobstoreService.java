@@ -182,7 +182,7 @@ public final class LocalBlobstoreService extends AbstractLocalRpcService
 
             String block_key = blobKey.getKeyString() + "__" + block_count;
             Key key = KeyFactory.createKey("__BlobChunk__", block_key);
-            if (this.blockKeyCache != key.toString())
+            if ((this.blockKeyCache != null && !(this.blockKeyCache.equals(key.toString()))) || this.blockCache == null)
             {
                 Entity entity;
                 try
