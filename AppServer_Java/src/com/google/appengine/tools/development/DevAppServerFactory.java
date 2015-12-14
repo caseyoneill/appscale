@@ -10,11 +10,18 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.net.SocketPermission;
 import java.net.URL;
+import java.security.AccessController;
+import java.security.CodeSource;
 import java.security.Permission;
+import java.security.PrivilegedAction;
+import java.security.ProtectionDomain;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.PropertyPermission;
+import java.util.Set;
 
 /**
  * Creates new {@link DevAppServer DevAppServers} which can be used to launch
@@ -196,24 +203,40 @@ public class DevAppServerFactory {
     return createDevAppServer(appDir, externalResourceDir, webXmlLocation, appEngineWebXmlLocation, address, port, useCustomStreamHandler, installSecurityManager, containerConfigProperties, false);
   }
   
-  private DevAppServer createDevAppServer(File appDir, File externalResourceDir,
+  private DevAppServer createDevAppServer(final File appDir, final File externalResourceDir,
+	final File webXmlLocation, final File appEngineWebXmlLocation, final String address,
+    final int port, final boolean useCustomStreamHandler, final boolean installSecurityManager,
+    final Map<String, Object> containerConfigProperties, final boolean noJavaAgent) {
+	    return AccessController.doPrivileged(new PrivilegedAction<DevAppServer>() {
+	        @Override public DevAppServer run() {
+		        return doCreateDevAppServer(appDir, externalResourceDir, webXmlLocation, appEngineWebXmlLocation, address, port, useCustomStreamHandler, installSecurityManager, containerConfigProperties, noJavaAgent);
+		    }
+		  });
+	}
+
+	private DevAppServer doCreateDevAppServer(File appDir, File externalResourceDir,
 	      File webXmlLocation, File appEngineWebXmlLocation, String address, int port,
 	      boolean useCustomStreamHandler, boolean installSecurityManager,
 	      Map<String, Object> containerConfigProperties, boolean noJavaAgent) {
-    if (installSecurityManager) {
-      SecurityManagerInstaller.install();
+	if (!noJavaAgent) {
+		testAgentIsInstalled();
     }
 
     DevAppServerClassLoader loader = DevAppServerClassLoader.newClassLoader(
         DevAppServerFactory.class.getClassLoader());
-
-    if (!noJavaAgent) {
-    	testAgentIsInstalled();
-    }
-
     DevAppServer devAppServer;
+
+
     try {
-      Class<?> devAppServerClass = Class.forName(DEV_APP_SERVER_CLASS, true, loader);
+     Class<?> devAppServerClass = Class.forName(DEV_APP_SERVER_CLASS, false, loader);
+    
+     if (installSecurityManager) {
+    	 SecurityManagerInstaller.install(
+    			 false,
+    			 getPrivilegedJars(devAppServerClass));
+     } 
+    	
+    	
       Constructor<?> cons = devAppServerClass.getConstructor(DEV_APPSERVER_CTOR_ARG_TYPES);
       cons.setAccessible(true);
       devAppServer = (DevAppServer) cons.newInstance(
@@ -231,6 +254,29 @@ public class DevAppServerFactory {
     }
     return devAppServer;
   }
+	
+  private static URL[] getPrivilegedJars(Class<?> devAppServerClass) {
+    Set<URL> urls = new HashSet<URL>();
+    for (Class<?> privilegedClass : Arrays.<Class<?>>asList(
+        devAppServerClass, DevAppServerFactory.class, SecurityManagerInstaller.class)) {
+      ProtectionDomain domain = privilegedClass.getProtectionDomain();
+      if (domain == null) {
+          continue;
+      }
+      CodeSource source = domain.getCodeSource();
+      if (source == null) {
+          continue;
+      }
+      URL location = source.getLocation();
+      if (location == null) {
+          continue;
+      }
+      urls.add(location);
+    }
+	return urls.toArray(new URL[urls.size()]);
+  }
+
+  private static final URL[] NO_JARS = new URL[0];
 
   /**
    * Build a {@link Map} that contains settings that will allow us to inject

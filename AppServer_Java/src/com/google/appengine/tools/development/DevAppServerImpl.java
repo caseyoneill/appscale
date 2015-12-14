@@ -20,6 +20,8 @@ import java.lang.reflect.Method;
 import java.net.BindException;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TimeZone;
@@ -89,7 +91,7 @@ class DevAppServerImpl
 
     DelegatingModulesFilterHelper modulesFilterHelper = new DelegatingModulesFilterHelper(backendContainer, modules);
 
-    this.containerConfigProperties = (ImmutableMap<String, Object>)(Map<?,?>)(ImmutableMap.builder().putAll(containerConfigProperties).put(MODULES_FILTER_HELPER_PROPERTY, modulesFilterHelper).put("devappserver.portMappingProvider", this.backendContainer).build());
+    this.containerConfigProperties = ImmutableMap.<String, Object>builder().putAll(containerConfigProperties).put(MODULES_FILTER_HELPER_PROPERTY, modulesFilterHelper).put("devappserver.portMappingProvider", this.backendContainer).build();
 
     this.backendContainer.init(address, this.applicationConfigurationManager.getPrimaryModuleConfigurationHandle(), externalResourceDir, this.containerConfigProperties, this);
 
@@ -118,10 +120,31 @@ class DevAppServerImpl
   Map<String, String> getServiceProperties() {
     return this.serviceProperties;
   }
+  
+  /**
+   * Starts the server.
+   *
+   * @throws IllegalStateException If the server has already been started or
+   * shutdown.
+   * @throws AppEngineConfigException If no WEB-INF directory can be found or
+   * WEB-INF/appengine-web.xml does not exist.
+   * @return a latch that will be decremented to zero when the server is shutdown.
+  */
+  @Override
+  public CountDownLatch start() throws Exception {
+    try {
+      return AccessController.doPrivileged(new PrivilegedExceptionAction<CountDownLatch>() {
+        @Override public CountDownLatch run() throws Exception {
+          return doStart();
+        }
+      });
+    } catch (PrivilegedActionException e) {
+      throw e.getException();
+    }
+  }
 
-  public CountDownLatch start()
-    throws Exception
-  {
+  private CountDownLatch doStart() throws Exception {
+	  
     if (this.serverState != ServerState.INITIALIZING) {
       throw new IllegalStateException("Cannot start a server that has already been started.");
     }
@@ -260,15 +283,24 @@ class DevAppServerImpl
     if (this.serverState != ServerState.RUNNING) {
       throw new IllegalStateException("Cannot restart a server that is not currently running.");
     }
-    this.modules.shutdown();
-    this.backendContainer.shutdownAll();
-    this.shutdownLatch.countDown();
-    this.modules.createConnections();
-    this.backendContainer.configureAll(this.apiProxyLocal);
-    this.modules.startup();
-    this.backendContainer.startupAll(this.apiProxyLocal);
-    this.shutdownLatch = new CountDownLatch(1);
-    return this.shutdownLatch;
+    try {
+    	return AccessController.doPrivileged(new PrivilegedExceptionAction<CountDownLatch>() {
+    		@Override public CountDownLatch run() throws Exception {
+    			modules.shutdown();
+    		    backendContainer.shutdownAll();
+    		    shutdownLatch.countDown();
+    		    modules.createConnections();
+    		    backendContainer.configureAll(apiProxyLocal);
+    		    modules.startup();
+    		    backendContainer.startupAll(apiProxyLocal);
+    		    shutdownLatch = new CountDownLatch(1);
+    		    return shutdownLatch;
+    		}
+    	 });
+    } catch (PrivilegedActionException e) {
+        throw e.getException();
+    }
+	    
   }
 
   public void shutdown() throws Exception
@@ -276,12 +308,21 @@ class DevAppServerImpl
     if (this.serverState != ServerState.RUNNING) {
       throw new IllegalStateException("Cannot shutdown a server that is not currently running.");
     }
-    this.modules.shutdown();
-    this.backendContainer.shutdownAll();
-    ApiProxy.setDelegate(null);
-    this.apiProxyLocal = null;
-    this.serverState = ServerState.SHUTDOWN;
-    this.shutdownLatch.countDown();
+    try {
+    	AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
+    	  @Override public Void run() throws Exception {
+		    modules.shutdown();
+		    backendContainer.shutdownAll();
+		    ApiProxy.setDelegate(null);
+		    apiProxyLocal = null;
+		    serverState = ServerState.SHUTDOWN;
+		    shutdownLatch.countDown();
+		    return null;
+    	  }
+    	});
+    } catch (PrivilegedActionException e) {
+      throw e.getException();
+    }
   }
 
   public void gracefulShutdown()
@@ -325,7 +366,7 @@ class DevAppServerImpl
     ApiProxy.Environment env = ApiProxy.getCurrentEnvironment();
 
     if ((env != null) && (env.getVersionId() != null)) {
-    	String moduleName = LocalEnvironment.getModuleName(env.getVersionId());
+    	String moduleName = env.getModuleId();
     	result = modules.getModule(moduleName).getMainContainer().getAppContext();
     }
     return result;
