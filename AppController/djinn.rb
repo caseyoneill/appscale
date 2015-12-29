@@ -304,11 +304,6 @@ class Djinn
     'message' => 'not enough open nodes'})
 
 
-  # The options that should be used when invoking wget, so that the
-  # AppController can automatically probe a site to see if it's up.
-  WGET_OPTIONS = "--tries=1000 --no-check-certificate -q -O /dev/null"
-
-
   # This is the duty cycle for the main loop(s).
   DUTY_CYCLE = 20
 
@@ -1142,7 +1137,6 @@ class Djinn
       command = "#{APPSCALE_TOOLS_HOME}/bin/appscale-upload-app --file " +
         "'#{archived_file}' --email #{email} --keyname #{keyname} 2>&1"
       output = Djinn.log_run("#{command}")
-      File.delete(archived_file)
       if output.include?("Your app can be reached at the following URL")
         result = "true"
       else
@@ -1385,7 +1379,7 @@ class Djinn
       return BAD_SECRET_MSG
     end
 
-    return ZKInterface.exists?('/deployment_id')
+    return ZKInterface.exists?(DEPLOYMENT_ID_PATH)
   end
 
   # Retrieves the deployment ID from ZooKeeper.
@@ -1397,7 +1391,7 @@ class Djinn
     end
 
     begin
-      return ZKInterface.get('/deployment_id')
+      return ZKInterface.get(DEPLOYMENT_ID_PATH)
     rescue FailedZooKeeperOperationException => e
       Djinn.log_warn("(get_deployment_id) failed talking to zookeeper " +
         "with #{e.message}.")
@@ -1414,7 +1408,7 @@ class Djinn
     end
 
     begin
-      ZKInterface.set('/deployment_id', id, false)
+      ZKInterface.set(DEPLOYMENT_ID_PATH, id, false)
     rescue FailedZooKeeperOperationException => e
       Djinn.log_warn("(set_deployment_id) failed talking to zookeeper " +
         "with #{e.message}.")
@@ -3507,7 +3501,6 @@ class Djinn
 
         if my_node.is_db_master? or my_node.is_db_slave?
           start_groomer_service()
-          start_backup_service()
         end
 
         start_backup_service()
@@ -3733,6 +3726,7 @@ class Djinn
   def start_datastore_server
     db_master_ip = nil
     my_ip = my_node.public_ip
+    verbose = @options['verbose'].downcase == 'true'
     @nodes.each { |node|
       db_master_ip = node.private_ip if node.is_db_master?
     }
@@ -3740,7 +3734,8 @@ class Djinn
 
     table = @options['table']
     zoo_connection = get_zk_connection_string(@nodes)
-    DatastoreServer.start(db_master_ip, my_node.private_ip, my_ip, table)
+    DatastoreServer.start(db_master_ip, my_node.private_ip, table,
+      verbose=verbose)
     HAProxy.create_datastore_server_config(my_node.private_ip, DatastoreServer::PROXY_PORT, table)
 
     # Let's wait for the datastore to be active.
@@ -3776,7 +3771,7 @@ class Djinn
 
   # Stops the datastore server.
   def stop_datastore_server
-    DatastoreServer.stop(@options['table'])
+    DatastoreServer.stop()
   end
 
   def is_hybrid_cloud?
